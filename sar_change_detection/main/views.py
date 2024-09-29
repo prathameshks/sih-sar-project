@@ -5,18 +5,18 @@ import geemap
 from sar_change_detection.settings import env, BASE_DIR
 import os
 import json
-from datetime import datetime
-import numpy as np
-import torch
-import torchvision.transforms as transforms
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.cluster import DBSCAN
-from segmentation_models_pytorch import DeepLabV3Plus
+# from datetime import datetime
+# import numpy as np
+# import torch
+# import torchvision.transforms as transforms
+# from sklearn.ensemble import RandomForestClassifier
+# from sklearn.cluster import DBSCAN
+# from segmentation_models_pytorch import DeepLabV3Plus
 from PIL import Image
-import rasterio
-from rasterio.features import shapes
-from shapely.geometry import shape
-import geopandas as gpd
+# import rasterio
+# from rasterio.features import shapes
+# from shapely.geometry import shape
+# import geopandas as gpd
 from django.template import loader
 from django.http import HttpResponse
 import json
@@ -26,191 +26,161 @@ service_account = env('GCP_SERVICE_ACCOUNT_ID')
 credentials = ee.ServiceAccountCredentials(service_account, os.path.join(BASE_DIR, 'service-account-key.json'))
 ee.Initialize(credentials)
 
-# Load pre-trained models
-def load_cnn_model():
-    model = DeepLabV3Plus(encoder_name="resnet34", classes=1)
-    # model.load_state_dict(torch.load('path_to_your_pretrained_deeplabv3plus_model.pth'))
-    model.eval()
-    return model
+def get_closest_images(s2_collection, start_date, end_date):
+    """
+    Gets the closest non-None Sentinel-2 images BEFORE the specified start and end dates.
 
-def load_random_forest_model():
-    # Load your pre-trained Random Forest model here
-    # If you don't have a pre-trained model, we'll create a new one
-    return RandomForestClassifier(n_estimators=100, random_state=42)
+    Args:
+        s2_collection: An ee.ImageCollection of Sentinel-2 images.
+        start_date: The start date of the image search.
+        end_date: The end date of the image search.
 
-cnn_model = load_cnn_model()
-rf_model = load_random_forest_model()
+    Returns:
+        A list containing the closest non-None Sentinel-2 images BEFORE the start and end dates.
+    """
 
-# Preprocessing function for CNN input
-def preprocess_for_cnn(image):
-    transform = transforms.Compose([
-        transforms.Resize((256, 256)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ])
-    return transform(image).unsqueeze(0)
+    start_images = s2_collection.filterDate('1900-01-01', start_date).sort('system:time_start', False)
+    end_images = s2_collection.filterDate('1900-01-01', end_date).sort('system:time_start', False)
+
+    closest_start_image = None
+    closest_end_image = None
+
+    # Iterate to find the first non-None image for the start date
+    start_list = start_images.toList(start_images.size()) # convert the collection to a list 
+    for i in range(start_images.size().getInfo()):
+        img = ee.Image(start_list.get(i)) # get the image from the list using index i
+        if img.getInfo() is not None:
+            closest_start_image = img
+            break
+
+    # Iterate to find the first non-None image for the end date
+    end_list = end_images.toList(end_images.size())
+    for i in range(end_images.size().getInfo()):
+        img = ee.Image(end_list.get(i))
+        if img.getInfo() is not None:
+            closest_end_image = img
+            break
+
+    return [closest_start_image, closest_end_image]
 
 @csrf_exempt
 def detect_changes(request):
     if request.method == 'POST':
-        # try:
+        # try :
         if True:
-            # Parse and validate input parameters
-            aoi = request.POST.get('aoi') 
+            # Parse input parameters
+            aoi = json.loads(request.POST.get('aoi'))
             start_date = request.POST.get('start_date')
             end_date = request.POST.get('end_date')
-            
-            change_type = request.POST.get('change_type', 'all')
-            size_threshold = request.POST.get('size_threshold',1000)
-            output_type = request.POST.get('output_type','outline')
-            file_type = request.POST.get('file_type','geojson')
-            
-            print(aoi, start_date, end_date)
-            print(change_type, size_threshold, output_type, file_type)
+            # aoi_geo = geemap.geojson_to_ee(aoi)
+            aoi_geo = geemap.geojson_to_ee(aoi).geometry()  # Convert to Geometry
 
-            # Validate parameters
-            if not all([aoi, start_date, end_date]):
-                return JsonResponse({'error': 'Missing required parameters'}, status=400)
-
-            # Convert AOI to ee.Geometry
-            aoi = json.loads(aoi)
-            aoi_geo = geemap.geojson_to_ee(aoi)
-
-            # Load Sentinel-1 and Sentinel-2 imagery
-            s1_collection = ee.ImageCollection('COPERNICUS/S1_GRD') \
-                .filterBounds(aoi_geo) \
-                .filterDate(start_date, end_date) \
-                .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
 
             s2_collection = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED') \
                 .filterBounds(aoi_geo) \
-                .filterDate(start_date, end_date) \
                 .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20))
 
-            # Perform change detection using CNN
-            def cnn_change_detection(image_pair):
-                # Download the image pair from Earth Engine
-                image_data = image_pair.getInfo()
-                
-                # Preprocess the image for the CNN
-                input_tensor = preprocess_for_cnn(Image.fromarray(np.array(image_data['bands'][0]['data'], dtype=np.uint8).reshape(image_data['bands'][0]['dimensions'])))
-                
-                # Run it through the CNN
-                with torch.no_grad():
-                    output = cnn_model(input_tensor)
-                    change_mask = (output > 0.5).float()  # Threshold the output
-                
-                # Convert the PyTorch tensor to a numpy array
-                change_mask_np = change_mask.squeeze().numpy()
-                
-                # Create an Earth Engine image from the numpy array
-                change_mask_ee = ee.Image.fromArray(change_mask_np).reproject(crs=image_pair.projection())
-                
-                return change_mask_ee
+            # Get the closest images
+            # start_date = ee.Date('2024-09-01')  # Replace with your start date
+            # end_date = ee.Date('2024-09-28')  # Replace with your end date
+            images = get_closest_images(s2_collection, start_date, end_date)
+
+            # Access the images (these won't be None even if exact dates aren't available)
+            s2_start = images[0]
+            s2_end = images[1]
+
+            start_image_date = s2_start.date().format('YYYY-MM-dd HH:mm:ss').getInfo()
+            end_image_date = s2_end.date().format('YYYY-MM-dd HH:mm:ss').getInfo()
+
+            # Subset bands before calculation (similar to the example you provided)
+            s2_start_bands = s2_start.select(['B4', 'B3', 'B2']) 
+            s2_end_bands = s2_end.select(['B4', 'B3', 'B2'])
+
+            # Calculate difference image 
+            diff = s2_end_bands.subtract(s2_start_bands).abs() # abs() after the subtraction
+            change_image = diff.reduce(ee.Reducer.sum()).rename('change')
+
+            # print('Change image:', change_image.getInfo())
+
+            # Apply threshold to identify significant changes
+            threshold = 0.2  # Adjust this value based on your needs
+            significant_changes = change_image.gt(threshold)
+
+            # Print some information to check if significant_changes is empty
+            # print('Significant changes count:', significant_changes.bandNames().size().getInfo()) 
             
-            changes = s1_collection.map(cnn_change_detection)
-
-            # Apply DBSCAN clustering to group changes
-            def apply_dbscan(image):
-                # Extract features for clustering
-                features = image.select(['VV', 'VH']).sample(region=aoi_geo, scale=30, numPixels=5000)
-                feature_array = np.array(features.getInfo()['features'])
-                
-                # Perform DBSCAN clustering
-                dbscan = DBSCAN(eps=0.5, min_samples=5)
-                cluster_labels = dbscan.fit_predict(feature_array)
-                
-                # Create a new feature collection with cluster labels
-                clustered_features = ee.FeatureCollection(
-                    [ee.Feature(ee.Geometry.Point([f['geometry']['coordinates'][0], f['geometry']['coordinates'][1]]), 
-                                {'cluster': int(label)}) for f, label in zip(features.getInfo()['features'], cluster_labels)]
-                )
-                
-                # Convert clustered features to an image
-                clustered_image = ee.Image().int().paint(clustered_features, 'cluster')
-                
-                return image.addBands(clustered_image.rename('cluster'))
-
-            clustered_changes = changes.map(apply_dbscan)
-
-            # Extract features for Random Forest classification
-            def extract_features(image):
-                # Extract relevant features for classification
-                return image.select(['VV', 'VH', 'change', 'cluster'])
-
-            features = clustered_changes.map(extract_features)
-
-            # Apply Random Forest classification
-            def apply_random_forest(features):
-                # Download features from Earth Engine
-                feature_array = np.array(features.getInfo()['features'])
-                X = feature_array[:, :4]  # VV, VH, change, cluster
-                y = feature_array[:, 4]   # Assuming the 5th column is the label (you may need to adjust this)
-                
-                # Train the Random Forest model (or use a pre-trained model)
-                rf_model.fit(X, y)
-                
-                # Make predictions
-                predictions = rf_model.predict(X)
-                
-                # Create a new feature collection with predictions
-                predicted_features = ee.FeatureCollection(
-                    [ee.Feature(ee.Geometry.Point([f['geometry']['coordinates'][0], f['geometry']['coordinates'][1]]), 
-                                {'prediction': int(pred)}) for f, pred in zip(features.getInfo()['features'], predictions)]
-                )
-                
-                # Convert predicted features to an image
-                prediction_image = ee.Image().int().paint(predicted_features, 'prediction')
-                
-                return features.addBands(prediction_image.rename('classification'))
-
-            classified_changes = features.map(apply_random_forest)
-
-            # Filter changes based on type and size
-            if change_type != 'all':
-                classified_changes = classified_changes.select(change_type)
-            
-            size_filtered_changes = classified_changes.updateMask(
-                classified_changes.connectedPixelCount().gte(size_threshold / 900)  # Assuming 30m resolution
+            # Convert changes to vectors
+            vectors = significant_changes.reduceToVectors(
+                geometry=aoi_geo,
+                scale=10,
+                geometryType='polygon',
+                maxPixels=1e9,
+                eightConnected=False
             )
 
-            # Generate output based on specified type
-            if output_type == 'contrast':
-                output = size_filtered_changes.visualize(min=0, max=1, palette=['blue', 'red'])
-            elif output_type == 'outline':
-                output = size_filtered_changes.reduceToVectors(scale=30, geometryType='polygon')
-            else:  # heatmap
-                output = size_filtered_changes.focalMax(2).kernelGaussian(5)
+            # Prepare outputs
+            start_image_url = s2_start.getThumbURL({
+                'min': 0,
+                'max': 3000,
+                'dimensions': 1024,
+                'region': aoi_geo,
+                'bands': ['B4', 'B3', 'B2']
+            })
 
-            # Get the result as GeoJSON or Shapefile
-            if file_type == 'geojson':
-                result = geemap.ee_to_geojson(output)
-            else:  # shapefile
-                result = geemap.ee_to_shapefile(output, filename='changes.shp')
+            end_image_url = s2_end.getThumbURL({
+                'min': 0,
+                'max': 3000,
+                'dimensions': 1024,
+                'region': aoi_geo,
+                'bands': ['B4', 'B3', 'B2']
+            })
+
+            change_image_url = significant_changes.getThumbURL({
+                'min': 0,
+                'max': 1,
+                'dimensions': 1024,
+                'region': aoi_geo,
+                'palette': ['black', 'white']
+            })
+
+            # Get GeoJSON of changes
+            geojson = geemap.ee_to_geojson(vectors)
 
             # Prepare the response
             response = {
-                'changes': result,
-                'metadata': {
-                    'start_date': start_date,
-                    'end_date': end_date,
-                    'change_type': change_type,
-                    'size_threshold': size_threshold,
-                    'output_type': output_type,
-                    'file_type': file_type
-                }
+                'start_image': start_image_url,
+                'end_image': end_image_url,
+                'change_image': change_image_url,
+                'changes_geojson': geojson,
+                'start_date': start_image_date,
+                'end_date': end_image_date,
+                'are_images_available': start_image_date != end_image_date
             }
 
             return JsonResponse(response)
-
-        # except Exception as e:
-        #     # print detailed error message
-        #     print(e)
-        #     return JsonResponse({'error': str(e)}, status=500)
+        try:
+            pass
+        except Exception as e:
+            print(e)
+            return JsonResponse({'error': str(e)}, status=500)
 
     return JsonResponse({'error': 'Invalid request method'}, status=400)
 
-def index(request):
+@csrf_exempt
+def detect_changes_dummy(request):
+    response = {
+'start_image' : 'https://earthengine.googleapis.com/v1/projects/earthengine-legacy/thumbnails/d9ca3650cc9bb81f8dfa00e199488d84-75c293210111bdebdc76b67a5f40f8a2:getPixels',
+'end_image' : 'https://earthengine.googleapis.com/v1/projects/earthengine-legacy/thumbnails/3bbec56d91c3f3acb5b4883bde516121-21b2ef1a6e0f5f87181965f3ee10e8ff:getPixels',
+'change_image' : 'https://earthengine.googleapis.com/v1/projects/earthengine-legacy/thumbnails/938736a42876bfcd98b4216344922204-458b48be4ba055f051bca5b9b3b07936:getPixels',
+'changes_geojson' : {'type': 'FeatureCollection', 'columns': {'count': 'Long<0, 4294967295>', 'label': 'Byte<0, 1>', 'system:index': 'String'}, 'features': [{'type': 'Feature', 'geometry': {'geodesic': False, 'type': 'Polygon', 'coordinates': [[[82.13436931633424, 22.189324478416093], [82.13446630616885, 22.18932380290995], [82.13445760192494, 22.188239893352513], [82.14182876238527, 22.18818838863434], [82.14182949242813, 22.18827871420921], [82.15424403729492, 22.18819121539898], [82.15424477527888, 22.18828154057859], [82.16675625384454, 22.188192400941592], [82.16675699982352, 22.18828272571696], [82.17926842252295, 22.18819262513414], [82.17926917650591, 22.188282949505265], [82.19178054266538, 22.1881918879856], [82.19178130464336, 22.188282211943502], [82.20419562693456, 22.188190906540218], [82.20419639685363, 22.188281230084893], [82.21670764838808, 22.188188254165528], [82.21670842629318, 22.18827857729698], [82.22223663608479, 22.188237188767737], [82.22232496514495, 22.1984436746392], [82.22222797211235, 22.198444402741703], [82.22232808034964, 22.21000571645082], [82.22223107938491, 22.210006444912647], [82.22233124557253, 22.221567742191578], [82.22223423664873, 22.221568471012734], [82.22226241802989, 22.22482008295796], [82.21207622425626, 22.22489629983552], [82.21207544788729, 22.224805976964582], [82.19956092908134, 22.22489874169901], [82.19956016072534, 22.22480841840586], [82.1870455842206, 22.2249002204697], [82.18704482388655, 22.224809896763325], [82.17462720327806, 22.224900035668277], [82.17462645089411, 22.22480971155766], [82.162111761543, 22.224899595709385], [82.16211101718099, 22.224809271185546], [82.14969328595397, 22.224897507027535], [82.14969254954205, 22.224807182108435], [82.13717775006648, 22.224895148303126], [82.13717702166754, 22.22480482298877], [82.1344606245762, 22.224823789236144], [82.1343879775407, 22.215791244451445], [82.13448498556617, 22.215790568163765], [82.13437897887395, 22.202603034825817], [82.13447597783544, 22.202602358933397], [82.13436931633424, 22.189324478416093]]]}, 'id': '+1770+4591', 'properties': {'count': 367129, 'label': 1}}]},
+'start_date' : '2024-05-24 05:12:40',
+'end_date' : '2024-05-04 05:12:44',
+'are_images_available' : 'True',
+    }
+
+    return JsonResponse(response)
+    
+def index(request):    
     template = loader.get_template('change_detection.html')
     context = {}
     return HttpResponse(template.render(context, request))

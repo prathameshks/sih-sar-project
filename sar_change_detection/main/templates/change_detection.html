@@ -1,101 +1,229 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AOI Selection with Leaflet Draw</title>
+    <title>Man-Made Change Detection with Leaflet</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"
         integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
     <style>
         #map {
-            height: 600px;
+            height: 500px;
+        }
+
+        .image-section img {
             width: 100%;
+            max-height: 300px;
+            object-fit: cover;
+            border-radius: 8px;
+        }
+
+        .image-label {
+            text-align: center;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+
+        #result {
+            display: none;
+        }
+
+        #loader {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+
+        .spinner-border {
+            color: white;
+        }
+
+        #loader_message {
+            margin-top: 20px;
+            color: white;
+            font-size: 1.5rem;
         }
     </style>
 </head>
 
-<body>
+<body class="bg-light">
 
-    <h2>Man Made Change detection Using Sentinel-2 Imagery and Google Earth Engine</h2>
-
-    <div class="flex flex-row m-2">
-        <div class=" col-sm-12 col-md-12 col-lg-9 p-3">
-            <div id="map" style="height: 450px;"></div>
+    <div id="loader">
+        <div class="spinner-border" role="status">
+            <span class="visually-hidden">Loading...</span>
         </div>
-        <div class=" col-sm-12 col-md-12 col-lg-3 p-3">
+        <div id="loader_message">Loading, please wait...</div>
+    </div>
 
-            <form id="changeDetectionForm">
-                <div class="input-group mb-3">
-                    <span class="input-group-text">Start Date</span>
-                    <input type="date" aria-label="Start date" name="start_date" class="form-control">
-                </div>
+    <div class="container mt-4">
+        <h2 class="text-center">Man-Made Change Detection Using Sentinel-2 Imagery and Google Earth Engine</h2>
 
-                <div class="input-group mb-3">
-                    <span class="input-group-text">End Date</span>
-                    <input type="date" aria-label="End date" name="end_date" class="form-control">
-                </div>
+        <div class="row mt-4">
+            <div class="col-lg-8 col-md-12 mb-4">
+                <div id="map"></div>
+            </div>
+            <div class="col-lg-4 col-md-12">
+                <form id="changeDetectionForm" class="p-3 border bg-white rounded shadow-sm">
+                    <div class="mb-3">
+                        <label for="startDate" class="form-label">Start Date</label>
+                        <input type="date" id="startDate" name="start_date" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="endDate" class="form-label">End Date</label>
+                        <input type="date" id="endDate" name="end_date" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="minChangeSize" class="form-label">Min Change Size (in meters)</label>
+                        <input type="number" id="minChangeSize" name="min_change_size" class="form-control" min="1"
+                            max="5000" value="50" required>
+                    </div>
+                    <fieldset class="mb-3">
+                        <legend class="col-form-label pt-0">Output Map Type</legend>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="output_map_type"
+                                id="outputMapTypeHeatmap" value="heatmap" required>
+                            <label class="form-check-label" for="outputMapTypeHeatmap">Heatmap</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="output_map_type"
+                                id="outputMapTypeChoropleth" value="choropleth" required>
+                            <label class="form-check-label" for="outputMapTypeChoropleth">Choropleth (Color-Based
+                                Map)</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="output_map_type"
+                                id="outputMapTypePointCluster" value="point_cluster" required>
+                            <label class="form-check-label" for="outputMapTypePointCluster">Point Cluster Map</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="output_map_type"
+                                id="outputMapTypeGradientPolygon" value="gradient_polygon" required>
+                            <label class="form-check-label" for="outputMapTypeGradientPolygon">Gradient Polygon
+                                Map</label>
+                        </div>
+                    </fieldset>
+                    <button class="btn btn-primary w-100" type="submit">Detect Changes</button>
+                </form>
+            </div>
+        </div>
 
-                <div class="input-group mb-3">
-                    <span class="input-group-text">Min Change Size <span class="text-muted text-sm"> (in
-                            meters)</span></span>
-                    <input type="number" aria-label="Minimum change size in meters" name="min_change_size"
-                        class="form-control" min="1" max="5000" value="50">
+        <div id="result" class="mt-4">
+            <div class="row mb-4">
+                <div class="col-md-4 image-section">
+                    <img id="startImage" alt="Start Image">
+                    <div class="image-label" id="startDateLabel">Start Date:</div>
                 </div>
-
-                <div class=" mb-3">
-                    <span class="input-label">Output Map Type</span>
-                    <div class="form-check">
-                        <input class="form-check-input" type="radio" name="output_map_type" id="output_map_type_heatmap"
-                            value="heatmap">
-                        <label class="form-check-label" for="output_map_type_heatmap">
-                            Heatmap
-                        </label>
-                    </div>
-                    <div class="form-check">
-                        <input class="form-check-input" type="radio" name="output_map_type" id="output_map_type_choropleth"
-                            value="choropleth">
-                        <label class="form-check-label" for="output_map_type_choropleth">
-                            Choropleth (Color Based Map)
-                        </label>
-                    </div>
-                    <div class="form-check">
-                        <input class="form-check-input" type="radio" name="output_map_type" id="output_map_type_point_cluster"
-                            value="point_cluster">
-                        <label class="form-check-label" for="output_map_type_point_cluster">
-                            Point Cluster Map
-                        </label>
-                    </div>
-                    <div class="form-   ">
-                        <input class="form-check-input" type="radio" name="output_map_type" id="output_map_type_gradient_polygon"
-                            value="gradient_polygon">
-                        <label class="form-check-label" for="output_map_type_gradient_polygon">
-                            Gradient Polygon Map 
-                        </label>
-                    </div>
+                <div class="col-md-4 image-section">
+                    <img id="endImage" alt="End Image">
+                    <div class="image-label" id="endDateLabel">End Date:</div>
                 </div>
-                <button class="btn btn-primary" type="submit">Detect Changes</button>
-            </form>
+                <div class="col-md-4 image-section">
+                    <img id="changeImage" alt="Change Detection Result">
+                    <div class="image-label">Changes Detected</div>
+                </div>
+            </div>
+            <div id="changeMap" class="border bg-white rounded p-3 shadow-sm w-100" style="height: 500px;"></div>
         </div>
     </div>
 
-    <div id="result"></div>
-
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
-        integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
-        crossorigin="anonymous"></script>
+        integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous">
+        </script>
     <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
-    <!-- jquery -->
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.4/jquery.min.js"></script>
 
     <script>
+
+        // Initialize the map
         var map = L.map('map').setView([22.15, 82.32], 5);
+        var changeMap = L.map('changeMap').setView([22.15, 82.32], 5);
+
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         }).addTo(map);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(changeMap);
+
+        function setLoading(message = "Loading ...") {
+            document.getElementById("loader").style.display = "flex";
+            document.getElementById("loader_message").innerHTML = message;
+        }
+
+        function hideLoading() {
+            document.getElementById("loader").style.display = "none";
+            document.getElementById("loader_message").innerHTML = "Loading ...";
+        }
+
+        async function setMapBounds(){
+            await map.invalidateSize();
+            await changeMap.invalidateSize();
+            await changeMap.fitBounds(drawnItems.getBounds());
+        }
+
+        async function show_result(data) {
+            document.getElementById("result").style.display = "block";
+            if (!changeMap) {
+                changeMap = L.map('changeMap').setView([22.15, 82.32], 5);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                }).addTo(changeMap);
+            }
+
+            setTimeout(function () {
+                changeMap.invalidateSize();
+            }, 200);
+
+            document.getElementById("changeImage").src = data.change_image;
+            document.getElementById("startImage").src = data.start_image;
+            document.getElementById("endImage").src = data.end_image;
+            document.getElementById("startDateLabel").innerHTML = "Start Date: " + data.start_date;
+            document.getElementById("endDateLabel").innerHTML = "End Date: " + data.end_date;
+
+
+            // Remove any existing layers on changeMap
+            if (typeof changeLayer !== 'undefined') {
+                changeMap.removeLayer(changeLayer);
+            }
+
+            // Add changes_geojson data as a polygon layer to changeMap
+            if (data.changes_geojson) {
+                changeLayer = L.geoJson(data.changes_geojson, {
+                    style: function (feature) {
+                        return {
+                            color: 'red',         // Border color of the polygon
+                            weight: 2,            // Border thickness
+                            opacity: 1,           // Border opacity
+                            fillColor: 'red',     // Fill color of the polygon
+                            fillOpacity: 0.6      // Fill opacity
+                        };
+                    }
+                }).addTo(changeMap);
+
+                // Fit map to bounds after layer addition with delay to ensure everything is rendered
+                setTimeout(() => {
+                    setMapBounds();
+                }, 300);
+            }
+
+        }
+
+        window.onload = function () {
+            hideLoading();
+        }
 
         // Initialize the Leaflet Draw feature group and control
         var drawnItems = new L.FeatureGroup();
@@ -119,48 +247,66 @@
         // Event listener for drawing a rectangle
         map.on(L.Draw.Event.CREATED, function (event) {
             var layer = event.layer;
+            drawnItems.clearLayers();  // Allow only one rectangle
             drawnItems.addLayer(layer);
-
-            // Convert the drawn rectangle to GeoJSON and log to the console
-            var geojson = layer.toGeoJSON();
-            console.log("Selected AOI as GeoJSON:", JSON.stringify(geojson, null, 2));
+        });
+        window.addEventListener("resize", function () {
+            map.invalidateSize();
+            if (changeMap) {
+                changeMap.invalidateSize();
+            }
         });
 
-        // on button click get selected area in the form as 
-        // GeoJSON and send it to the server        
-        document.getElementById('changeDetectionForm').onsubmit = function (e) {
+        // Form submission handler
+        document.getElementById('changeDetectionForm').onsubmit = async function (e) {
             e.preventDefault();
 
-            var form_data = new FormData(this);
+            if (drawnItems.getLayers().length === 0) {
+                alert("Please draw an area of interest (AOI) on the map.");
+                return;
+            }
 
-            // get the selected area
+            var form_data = new FormData(this);
             var aoi = JSON.stringify(drawnItems.toGeoJSON());
             form_data.append('aoi', aoi);
 
-            console.log(form_data);
+            // get middle of AOI
+            var bounds = drawnItems.getBounds();
 
-            // exit(0); 
-            fetch('/api/detect_changes/', {
-                method: 'POST',
-                body: form_data,
-            }).then(response => response.json())
-                .then(data => {
-                    document.getElementById('result').textContent = JSON.stringify(data);
+            try {
 
-                    L.geoJSON(data.changes).addTo(map);
+                setLoading("Detecting changes...");
+
+                // Send request
+                const response = await fetch('http://127.0.0.1:8000/api/detect_changes/', {
+                    method: 'POST',
+                    body: form_data,
                 });
+
+                hideLoading();
+
+                const data = JSON.parse(await response.text());
+
+
+                if (response.ok) {
+                    // Display results
+                    data.bounds = bounds;
+                    console.log(data);
+                    show_result(data);
+
+                } else {
+                    throw new Error(data.message || "Error detecting changes.");
+                }
+            } catch (error) {
+                hideLoading();
+                alert("Something went wrong: " + error.message);
+            }
         };
 
-        // make the end date today
-        document.getElementsByName('end_date')[0].value = new Date().toISOString().slice(0, 10);
-
-
-
+        // Set end date to today
+        document.getElementById('endDate').value = new Date().toISOString().slice(0, 10);
     </script>
 
 </body>
 
 </html>
-
-(66.972765 + 97.664107)/2
-(36.850385 + 7.459308)/2
