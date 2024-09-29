@@ -2,3 +2,13 @@ django
 earthengine-api
 geemap
 django-environ
+djangorestframework
+django-cors-headers
+torch 
+torchvision 
+scikit-learn 
+segmentation-models-pytorch 
+pillow 
+rasterio 
+shapely 
+geopandas
