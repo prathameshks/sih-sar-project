@@ -12,3 +12,4 @@ pillow
 rasterio 
 shapely 
 geopandas
+geojson

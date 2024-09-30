@@ -118,7 +118,7 @@
             </div>
         </div>
 
-        <div id="result" class="mt-4">
+        <div id="result" class="mt-4 flex flex-column">
             <div class="row mb-4">
                 <div class="col-md-4 image-section">
                     <img id="startImage" alt="Start Image">
@@ -133,6 +133,15 @@
                     <div class="image-label">Changes Detected</div>
                 </div>
             </div>
+            <!-- button to download geojson file -->
+             <div class="row mb-4">
+                <div class="col-md-12">
+                    <button id="downloadButton" class="btn btn-primary">Download GeoJSON File</button>
+
+                    <!-- button to download changes map from leaflet change map as image -->
+                    <button id="downloadMapButton" class="btn btn-primary">Download Changes Map Image</button>
+                </div>
+            </div>
             <div id="changeMap" class="border bg-white rounded p-3 shadow-sm w-100" style="height: 500px;"></div>
         </div>
     </div>
@@ -143,12 +152,15 @@
     <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.4/jquery.min.js"></script>
-
+    <script src="https://unpkg.com/dom-to-image@2.6.0/dist/dom-to-image.min.js"></script>
+  
     <script>
 
         // Initialize the map
         var map = L.map('map').setView([22.15, 82.32], 5);
         var changeMap = L.map('changeMap').setView([22.15, 82.32], 5);
+        var geojson_file_data = null;
+        var changes_map_ready = false;
 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -174,8 +186,54 @@
             await changeMap.fitBounds(drawnItems.getBounds());
         }
 
+        document.getElementById("downloadButton").addEventListener("click", function () {
+            if(geojson_file_data === null){
+                alert("Please detect changes first");
+                return;
+            }
+
+            const blob = new Blob([geojson_file_data], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'change_detection.geojson';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+
+            alert("GeoJSON file downloaded successfully! if not then try again.");
+        });
+
+        document.getElementById("downloadMapButton").addEventListener("click", async function () {
+            if(changes_map_ready === false){
+                alert("Please detect changes first");
+                return;
+            }
+
+            const mapElement = document.getElementById("changeMap");
+            const width = mapElement.offsetWidth;
+            const height = mapElement.offsetHeight;
+            
+            // using dom to download image
+            const dataURL = await domtoimage.toPng(mapElement, { width, height });
+            
+            // Create a new link element
+            const link = document.createElement('a');
+            link.href = dataURL;
+            link.download = 'map_image.png'; // Replace with your desired file name
+
+            // Trigger the download
+            link.click();            
+        });
+
         async function show_result(data) {
             document.getElementById("result").style.display = "block";
+            // save file data from geojson_data
+            geojson_file_data = data.geojson_data;
+
+            // Initialize the changeMap
             if (!changeMap) {
                 changeMap = L.map('changeMap').setView([22.15, 82.32], 5);
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -208,10 +266,12 @@
                             weight: 2,            // Border thickness
                             opacity: 1,           // Border opacity
                             fillColor: 'red',     // Fill color of the polygon
-                            fillOpacity: 0.6      // Fill opacity
+                            fillOpacity: 0.3      // Fill opacity
                         };
                     }
                 }).addTo(changeMap);
+
+                changes_map_ready = true;
 
                 // Fit map to bounds after layer addition with delay to ensure everything is rendered
                 setTimeout(() => {

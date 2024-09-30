@@ -20,6 +20,7 @@ from PIL import Image
 from django.template import loader
 from django.http import HttpResponse
 import json
+import geojson
 
 # Initialize Earth Engine
 service_account = env('GCP_SERVICE_ACCOUNT_ID')
@@ -92,19 +93,19 @@ def detect_changes(request):
             start_image_date = s2_start.date().format('YYYY-MM-dd HH:mm:ss').getInfo()
             end_image_date = s2_end.date().format('YYYY-MM-dd HH:mm:ss').getInfo()
 
-            # Subset bands before calculation (similar to the example you provided)
-            s2_start_bands = s2_start.select(['B4', 'B3', 'B2']) 
-            s2_end_bands = s2_end.select(['B4', 'B3', 'B2'])
+            # Calculate NDVI for both images
+            ndvi1 = s2_start.normalizedDifference(['B8', 'B4'])
+            ndvi2 = s2_end.normalizedDifference(['B8', 'B4'])
 
-            # Calculate difference image 
-            diff = s2_end_bands.subtract(s2_start_bands).abs() # abs() after the subtraction
-            change_image = diff.reduce(ee.Reducer.sum()).rename('change')
+            # Compute NDVI difference
+            ndvi_diff = ndvi2.subtract(ndvi1)
 
-            # print('Change image:', change_image.getInfo())
+            # Threshold the difference image
+            threshold = ndvi_diff.abs().gt(0.2)  # Adjust threshold as needed
 
-            # Apply threshold to identify significant changes
-            threshold = 0.2  # Adjust this value based on your needs
-            significant_changes = change_image.gt(threshold)
+            # Apply morphological operations to remove noise
+            kernel = ee.Kernel.circle(radius=1)
+            significant_changes = threshold.focal_min(kernel=kernel).focal_max(kernel=kernel)
 
             # Print some information to check if significant_changes is empty
             # print('Significant changes count:', significant_changes.bandNames().size().getInfo()) 
@@ -144,17 +145,30 @@ def detect_changes(request):
             })
 
             # Get GeoJSON of changes
-            geojson = geemap.ee_to_geojson(vectors)
+            # geojson_from_vector = geemap.ee_to_geojson(vectors)
+            
+            # Convert to GeoJSON
+            geojson_data = vectors.getInfo()
+            geojson_string = json.dumps(geojson_data)
+            
+            # get bounds of AOI
+            bounds = aoi_geo.bounds().getInfo()
+
+            # Save as GeoJSON file for download
+            # with open('change_detection.geojson', 'w') as f:
+            #     geojson.dump(geojson_data, f)
 
             # Prepare the response
             response = {
                 'start_image': start_image_url,
                 'end_image': end_image_url,
                 'change_image': change_image_url,
-                'changes_geojson': geojson,
+                'changes_geojson': geojson_data,
+                'geojson_data': geojson_string,
                 'start_date': start_image_date,
                 'end_date': end_image_date,
-                'are_images_available': start_image_date != end_image_date
+                'are_images_available': start_image_date != end_image_date,
+                'bounds': bounds
             }
 
             return JsonResponse(response)
