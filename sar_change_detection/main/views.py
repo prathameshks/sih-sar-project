@@ -75,8 +75,9 @@ def detect_changes(request):
             end_date = request.POST.get('end_date')
             threshold_val = float(request.POST.get('threshold_range'))
             if(threshold_val<0.1): threshold_val=0.1
-            else: threshold_val = 0.7
+            elif(threshold_val>0.9): threshold_val = 0.
             
+            # print(threshold_val)
             # aoi_geo = geemap.geojson_to_ee(aoi)
             aoi_geo = geemap.geojson_to_ee(aoi).geometry()  # Convert to Geometry
 
