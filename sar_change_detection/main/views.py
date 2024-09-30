@@ -73,6 +73,10 @@ def detect_changes(request):
             aoi = json.loads(request.POST.get('aoi'))
             start_date = request.POST.get('start_date')
             end_date = request.POST.get('end_date')
+            threshold_val = float(request.POST.get('threshold_range'))
+            if(threshold_val<0.1): threshold_val=0.1
+            else: threshold_val = 0.7
+            
             # aoi_geo = geemap.geojson_to_ee(aoi)
             aoi_geo = geemap.geojson_to_ee(aoi).geometry()  # Convert to Geometry
 
@@ -101,7 +105,7 @@ def detect_changes(request):
             ndvi_diff = ndvi2.subtract(ndvi1)
 
             # Threshold the difference image
-            threshold = ndvi_diff.abs().gt(0.2)  # Adjust threshold as needed
+            threshold = ndvi_diff.abs().gt(threshold_val)  # Adjust threshold as needed
 
             # Apply morphological operations to remove noise
             kernel = ee.Kernel.circle(radius=1)

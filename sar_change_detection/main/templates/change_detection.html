@@ -84,11 +84,11 @@
                         <input type="date" id="endDate" name="end_date" class="form-control" required>
                     </div>
                     <div class="mb-3">
-                        <label for="minChangeSize" class="form-label">Min Change Size (in meters)</label>
-                        <input type="number" id="minChangeSize" name="min_change_size" class="form-control" min="1"
-                            max="5000" value="50" required>
+                        <label for="threshold_range" class="form-label">Select Change Intensity: 
+                        <span class="float float-right align-right" id="threshold_value">0.5</span></label>
+                        <input type="range" min="0.1" max="0.9" value="0.5" step="0.1" class="form-range" id="threshold_range" name="threshold_range">                            
                     </div>
-                    <fieldset class="mb-3">
+                    <!-- <fieldset class="mb-3">
                         <legend class="col-form-label pt-0">Output Map Type</legend>
                         <div class="form-check">
                             <input class="form-check-input" type="radio" name="output_map_type"
@@ -112,7 +112,7 @@
                             <label class="form-check-label" for="outputMapTypeGradientPolygon">Gradient Polygon
                                 Map</label>
                         </div>
-                    </fieldset>
+                    </fieldset> -->
                     <button class="btn btn-primary w-100" type="submit">Detect Changes</button>
                 </form>
             </div>
@@ -153,8 +153,10 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.4/jquery.min.js"></script>
     <script src="https://unpkg.com/dom-to-image@2.6.0/dist/dom-to-image.min.js"></script>
-  
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
     <script>
+        
 
         // Initialize the map
         var map = L.map('map').setView([22.15, 82.32], 5);
@@ -186,11 +188,22 @@
             await changeMap.fitBounds(drawnItems.getBounds());
         }
 
-        document.getElementById("downloadButton").addEventListener("click", function () {
+        // change in threshold value
+        document.getElementById("threshold_range").addEventListener("input", function () {
+            document.getElementById("threshold_value").innerHTML = this.value;
+        });
+
+        document.getElementById("downloadButton").addEventListener("click",async function () {
             if(geojson_file_data === null){
-                alert("Please detect changes first");
+                // alert("Please detect changes first");
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Oops...',
+                    text: 'Please detect changes first',
+                })
                 return;
             }
+            await setLoading("Downloading GeoJSON file...");
 
             const blob = new Blob([geojson_file_data], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
@@ -203,14 +216,28 @@
             document.body.removeChild(link);
             URL.revokeObjectURL(url);
 
-            alert("GeoJSON file downloaded successfully! if not then try again.");
+            hideLoading();
+
+            // alert("GeoJSON file downloaded successfully! if not then try again.");
+            Swal.fire({
+                icon: 'success',
+                title: 'Success',
+                text: 'GeoJSON file downloaded successfully! if not then try again.',
+            })
         });
 
         document.getElementById("downloadMapButton").addEventListener("click", async function () {
             if(changes_map_ready === false){
-                alert("Please detect changes first");
+                //alert("Please detect changes first");
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Oops...',
+                    text: 'Please detect changes first',
+                })
                 return;
             }
+
+            await setLoading("Downloading map image...");
 
             const mapElement = document.getElementById("changeMap");
             const width = mapElement.offsetWidth;
@@ -225,7 +252,14 @@
             link.download = 'map_image.png'; // Replace with your desired file name
 
             // Trigger the download
-            link.click();            
+            link.click();
+
+            hideLoading();
+            Swal.fire({
+                icon: 'success',
+                title: 'Success',
+                text: 'Map image downloaded successfully! if not then try again.',
+            })
         });
 
         async function show_result(data) {
@@ -322,7 +356,12 @@
             e.preventDefault();
 
             if (drawnItems.getLayers().length === 0) {
-                alert("Please draw an area of interest (AOI) on the map.");
+                // alert("Please draw an area of interest (AOI) on the map.");
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Oops...',
+                    text: 'Please draw an area of interest (AOI) on the map.',
+                })
                 return;
             }
 
@@ -353,13 +392,28 @@
                     data.bounds = bounds;
                     console.log(data);
                     show_result(data);
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'Success',
+                        text: 'Changes detected successfully!',
+                    })
 
                 } else {
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Oops...',
+                        text: 'Something went wrong: ' + data.message,
+                    })
                     throw new Error(data.message || "Error detecting changes.");
                 }
             } catch (error) {
                 hideLoading();
-                alert("Something went wrong: " + error.message);
+                // alert("Something went wrong: " + error.message);
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Oops...',
+                    text: 'Something went wrong: ' + error.message,
+                })
             }
         };
 
